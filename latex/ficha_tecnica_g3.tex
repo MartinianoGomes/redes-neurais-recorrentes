@@ -1,0 +1,165 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazilian]{babel}
+\usepackage[margin=2cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage{microtype}
+
+\setlist{nosep,leftmargin=1.4em}
+\captionsetup{font=small,labelfont=bf,skip=4pt}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+
+\title{\vspace{-1.5cm}\textbf{Ficha Técnica --- Seminário 3 (G3)}\\[2pt]
+\large RNN, LSTM e GRU aplicadas à previsão da taxa da NTN-B Principal 150535 (Linha A --- Univariada)}
+\author{Grupo 3 \\ \small Tópicos Especiais em IA --- Mineração de Dados \\ \small Prof. Adam D. F. dos Santos --- UNIFESSPA}
+\date{27 de abril de 2026}
+
+\begin{document}
+\maketitle
+\vspace{-0.6cm}
+
+\section{Identificação}
+\textbf{Grupo:} G3 \quad | \quad \textbf{Título:} NTN-B Principal 150535 (vencimento 15/05/2035) \quad | \quad \textbf{Linha:} A --- Univariada. \textbf{Feature/Alvo:} Taxa Compra Manhã. \textbf{Horizonte:} 1 dia útil à frente. \textbf{Notebook (Colab):} \url{<INSERIR_LINK_COLAB>}.
+
+\section{Dados e Pré-processamento}
+A série foi consolidada a partir de 14 arquivos \texttt{NTN-B\_Principal\_AAAA.xls} disponíveis no portal do Tesouro Direto, lidos via \texttt{xlrd} e filtrados pela aba \texttt{NTN-B Princ 150535}, coluna \texttt{Taxa Compra Manhã}. Após deduplicação e ordenação cronológica, obteve-se uma série de \textbf{3.319 dias úteis}, cobrindo \textbf{02/01/2012 a 27/04/2026}, com taxa mínima de \textbf{2,89\%}, máxima de \textbf{7,80\%} e média de \textbf{5,41\%} a.a.
+
+A divisão treino/teste foi \textbf{cronológica} (sem \emph{shuffle}) com \texttt{SPLIT\_TREINO=0,80}: 2.655 dias para treino (até \textbf{25/08/2022}) e 664 dias para teste --- período que inclui o pico do ciclo de aperto monetário e o início do afrouxamento, oferecendo um cenário não trivial. As janelas deslizantes usaram \texttt{JANELA=20} ($\approx$ 1 mês útil) e \texttt{HORIZONTE=1}, gerando tensores $X_{tr} \in \mathbb{R}^{2635\times 20\times 1}$ e $X_{te} \in \mathbb{R}^{644\times 20\times 1}$. A normalização \texttt{MinMaxScaler} foi ajustada \textbf{somente no treino} e aplicada ao teste, evitando vazamento temporal; as métricas reportadas foram calculadas após \texttt{inverse\_transform} para a escala original (taxa decimal).
+
+\section{Modelos e Experimentos}
+Foram treinadas três arquiteturas com 1 camada recorrente e \texttt{HIDDEN\_SIZE=64}, seguidas de uma camada \texttt{Linear} sobre o último \emph{timestep}: \textbf{RNN-tanh} (4.353 parâmetros), \textbf{LSTM} (17.217) e \textbf{GRU} (12.929). O treinamento usou \texttt{Adam} (\texttt{LR=1e-3}), perda \texttt{MSE}, 150 épocas, \texttt{BATCH=32}, \emph{gradient clipping} 1,0 e \texttt{ReduceLROnPlateau} (\texttt{patience=15}, \texttt{factor=0,5}). \texttt{DROPOUT=0,0} pois a série é curta e há apenas uma camada. As curvas de \emph{loss} treino/teste convergem juntas em todas as três redes (Fig.~\ref{fig:loss}), sem sinal de \emph{overfitting} relevante.
+
+\textbf{Experimento específico do grupo --- variação de \texttt{JANELA}.} Reexecutamos o pipeline para \texttt{JANELA} $\in \{5, 10, 20, 40, 60\}$ a fim de avaliar quanto do passado recente contribui para prever a taxa do próximo dia útil. A Tabela~\ref{tab:janela} resume o RMSE por modelo e janela; a Fig.~\ref{fig:janela} sintetiza a tendência.
+
+\begin{table}[h]
+\centering
+\small
+\caption{RMSE (escala original) por \texttt{JANELA} e modelo --- experimento G3.}
+\label{tab:janela}
+\begin{tabular}{cccc}
+\toprule
+\textbf{JANELA} & \textbf{RNN} & \textbf{LSTM} & \textbf{GRU} \\
+\midrule
+5  & 0,000806 & 0,000797 & 0,000768 \\
+10 & 0,000768 & 0,000771 & 0,000775 \\
+20 & 0,000772 & 0,000772 & 0,000769 \\
+40 & 0,000793 & 0,000774 & 0,000773 \\
+60 & \textbf{0,000744} & \textbf{0,000741} & \textbf{0,000739} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A janela de 60 dias úteis ($\approx$ 3 meses) entrega o menor RMSE para as três arquiteturas, sugerindo que o sinal informativo se estende além do mês imediato. Ainda assim o ganho relativo é pequeno ($<5\%$ frente ao \emph{Naive}), o que delimita o teto de previsibilidade da série em escala diária.
+
+\section{Resultados}
+A Tabela~\ref{tab:metricas} compara RNN, LSTM e GRU com o \textbf{baseline \emph{Naive}} (prever taxa de hoje = taxa de amanhã) na configuração base (\texttt{JANELA=20}). Todos os modelos batem o \emph{Naive}, mas a margem é \textbf{marginal} ($\leq$ 2,2\% no RMSE), evidência de que a taxa diária se aproxima de um \emph{random walk} no horizonte de 1 dia.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Métricas no conjunto de teste (escala original, \texttt{JANELA=20}).}
+\label{tab:metricas}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Modelo} & \textbf{RMSE} & \textbf{MAE} & \textbf{MAPE} \\
+\midrule
+RNN          & 0,000774 & 0,000557 & 0,90\% \\
+LSTM         & \textbf{0,000771} & \textbf{0,000557} & \textbf{0,90\%} \\
+GRU          & 0,000779 & 0,000567 & 0,91\% \\
+Naive (t-1)  & 0,000788 & 0,000569 & 0,92\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A Fig.~\ref{fig:previsoes} mostra previsão vs.\ real para os três modelos no período de teste: as três curvas acompanham fielmente a real, com pequeno \emph{lag} característico de previsores que aprendem persistência. Os maiores erros ocorrem em \textbf{movimentos abruptos} (dias de COPOM, divulgação de IPCA e episódios de estresse externo em 2022--2024). O \emph{scatter} previsto $\times$ real (Fig.~\ref{fig:scatter}) é próximo da diagonal, com baixo viés sistemático.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.78\textwidth]{previsoes_g3.png}
+\caption{Previsão vs.\ real no teste (RNN, LSTM e GRU). \emph{Lag} suave em saltos abruptos.}
+\label{fig:previsoes}
+\end{figure}
+
+\section{Marcação a Mercado}
+Calculamos quartis móveis $Q_1$ e $Q_3$ com \texttt{JANELA\_QUARTIL=60} dias úteis e definimos três regimes: \textbf{Compra} (taxa $> Q_3$), \textbf{Neutro} ($Q_1 \le$ taxa $\le Q_3$) e \textbf{Evitar} (taxa $< Q_1$). A distribuição é quase equilibrada por construção (34,4\% / 34,3\% / 31,3\%) e o prêmio médio em dias de Compra sobre a média geral é \textbf{+0,3489 p.p.}, confirmando que o sinal de quartis captura janelas de taxa elevada (Tab.~\ref{tab:regime}, Fig.~\ref{fig:marcacao}).
+
+\begin{table}[h]
+\centering
+\small
+\caption{Estatística da Taxa Compra por regime (escala original, série completa).}
+\label{tab:regime}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Regime} & \textbf{Dias} & \textbf{\%} & \textbf{Mín} & \textbf{Mediana} & \textbf{Máx} & \textbf{Média} \\
+\midrule
+Compra (taxa $>Q_3$) & 1141 & 34,4\% & 3,38\% & 5,84\% & 7,80\% & \textbf{5,76\%} \\
+Neutro ($Q_1$--$Q_3$)& 1139 & 34,3\% & 3,16\% & 5,56\% & 7,56\% & 5,36\% \\
+Evitar (taxa $<Q_1$) & 1039 & 31,3\% & 2,89\% & 5,22\% & 7,41\% & 5,09\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Sinal combinado (rede + quartis).} Selecionando o melhor modelo por RMSE (\textbf{LSTM}), definimos sinal verde quando \emph{previsão} $> Q_3$ \textbf{E} taxa atual $> Q_3$. No teste, o sinal dispara em \textbf{264 de 644 dias} ($\approx 41\%$); a taxa média nesses dias é \textbf{6,32\%} contra \textbf{6,14\%} no teste como um todo, ganho de \textbf{+0,185 p.p.}. O sinal combinado é mais conservador que o quartil isolado e reduz falsos positivos em transições de regime, mas paga um prêmio menor --- compromisso clássico precisão/recall.
+
+\textbf{Modificação para alvo \emph{Taxa Venda}.} Não se aplica ao G3 (alvo é Taxa Compra). Para grupos cujo alvo é a Taxa Venda, a regra de marcação \textbf{inverte}: a operação favorável é \emph{comprar} quando a taxa de venda esperada é \textbf{baixa} (taxa $< Q_1$), pois o investidor adquire o título a preço alto recebendo cupom em IPCA + spread, e o sinal de Compra deve usar essa banda inferior.
+
+\section{Reflexão Crítica}
+\textbf{O que o experimento não respondeu?} (i) Não testamos horizontes maiores (5, 10, 20 dias), embora sejam mais relevantes para o investidor de buy-and-hold; (ii) o \emph{Naive} é um piso pobre --- comparações com ARIMA/GARCH e modelos de fator macro ficam em aberto; (iii) usamos um único \emph{split} cronológico --- robustez em \emph{rolling-origin} ou validação por regime macro (Selic alta vs.\ baixa) não foi avaliada; (iv) variância de inicialização não foi controlada (uma semente por modelo).
+
+\textbf{Que dados adicionais melhorariam o modelo?} Informação que precifica antes da taxa NTN-B reagir: \textbf{curva DI futuro}, \textbf{IPCA esperado (Boletim Focus)}, \textbf{Selic} e calendário COPOM/IPCA como \emph{dummies} de evento, dólar/EMBI como \emph{proxy} de risco-Brasil, e --- mais imediato --- \textbf{Taxa Venda, PU Compra e PU Venda} do próprio título, que é exatamente o salto da Linha B.
+
+\textbf{Riscos de usar a previsão para decisão de investimento.} (1) Vantagem $<5\%$ sobre o \emph{Naive} pode ser engolida por \textbf{custos operacionais} (spread compra-venda, IR regressivo, custódia, taxa B3). (2) O período de treino é dominado por Selic em níveis altos; o modelo pode \textbf{não generalizar} para regimes de juros baixos. (3) A marcação por quartis é \textbf{descritiva}, não prescritiva: ``taxa atual no top 25\% recente'' não impede que ela suba mais. (4) O sinal combinado entrega \textbf{+0,185 p.p. em média}, mas a distribuição tem caudas pesadas --- decisões de investimento exigem análise de \emph{drawdown} e horizonte, não apenas média. (5) A previsão de 1 dia útil tem pouca utilidade prática para um título com \emph{duration} próxima de 8 anos: o investidor da NTN-B Principal tipicamente carrega ao vencimento, e a marcação a mercado importa principalmente para reabertura de posição. Em suma, o experimento mostra que \textbf{redes recorrentes batem o \emph{Naive} de forma consistente porém modesta}, e que a peça mais útil do pipeline é a \textbf{combinação rede + quartis} como filtro de oportunidades, não como sinal autônomo.
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{loss_g3.png}
+\caption{Curvas de \emph{loss} treino/teste (RNN, LSTM, GRU).}
+\label{fig:loss}
+\end{minipage}\hfill
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{experimento_janela_g3.png}
+\caption{RMSE em função de \texttt{JANELA}.}
+\label{fig:janela}
+\end{minipage}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{scatter_g3.png}
+\caption{Previsto $\times$ real (3 modelos).}
+\label{fig:scatter}
+\end{minipage}\hfill
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{marcacao_g3.png}
+\caption{Marcação a mercado: bandas $Q_1$/$Q_3$ e sinal de Compra/Evitar.}
+\label{fig:marcacao}
+\end{minipage}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.7\textwidth]{sinal_combinado_g3.png}
+\caption{Sinal combinado (LSTM previsto $> Q_3$ \textbf{E} real $> Q_3$) no período de teste.}
+\label{fig:combinado}
+\end{figure}
+
+\clearpage
+\paragraph{Referências.}
+Hochreiter \& Schmidhuber (1997) --- \emph{LSTM}. Cho et al.\ (2014) --- \emph{GRU}. Tesouro Nacional --- Tesouro Direto: \url{https://www.tesourodireto.com.br}. Fabozzi (2006) --- \emph{Fixed Income Mathematics}, McGraw-Hill.
+
+\end{document}
